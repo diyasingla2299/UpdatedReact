@@ -7,7 +7,13 @@ const SEARCH_API_URL = "http://localhost:8888/api/products/search";
 
 const SearchResultsPage = () => {
   const [searchParams] = useSearchParams();
-  const query = searchParams.get("query") || "";
+
+  // accept both /search?query=... and /search?q=...
+  const query =
+    searchParams.get("query") ||
+    searchParams.get("q") ||
+    "";
+
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -26,6 +32,8 @@ const SearchResultsPage = () => {
 
         const token = localStorage.getItem("token");
         const url = `${SEARCH_API_URL}?name=${encodeURIComponent(term)}`;
+
+        console.log("➡️ Fetching search results from:", url);
 
         const response = await fetch(url, {
           headers: {
@@ -46,7 +54,7 @@ const SearchResultsPage = () => {
         const productsArray = Array.isArray(data) ? data : [];
         setProducts(productsArray);
       } catch (err) {
-        console.error(err);
+        console.error("❌ Search fetch failed:", err);
         setError(err.message || "Unable to fetch search results");
         setProducts([]);
       } finally {
@@ -68,11 +76,19 @@ const SearchResultsPage = () => {
       {loading && <p className="search-results-message">Loading...</p>}
 
       {!loading && error && (
-        <p className="search-results-message search-results-error">{error}</p>
+        <p className="search-results-message search-results-error">
+          {error}
+        </p>
       )}
 
-      {!loading && !error && !hasResults && (
+      {!loading && !error && !hasResults && query.trim() && (
         <p className="search-results-message">No products found.</p>
+      )}
+
+      {!loading && !error && !query.trim() && (
+        <p className="search-results-message">
+          Type something in the search bar to see results.
+        </p>
       )}
 
       {!loading && !error && hasResults && (
@@ -94,7 +110,9 @@ const SearchResultsPage = () => {
               )}
 
               <div className="search-result-info">
-                <h3 className="search-result-name">{product.productName}</h3>
+                <h3 className="search-result-name">
+                  {product.productName}
+                </h3>
 
                 {product.productPrice !== undefined &&
                   product.productPrice !== null && (
@@ -116,3 +134,4 @@ const SearchResultsPage = () => {
 };
 
 export default SearchResultsPage;
+

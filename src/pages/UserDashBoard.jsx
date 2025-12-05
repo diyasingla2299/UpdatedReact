@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import SearchBar from "../components/SearchBar";
 import profileAvatar from "../images/blank_1.avif";
 
-
 // ✅ Toast with clear floating styling (top-right)
 const Toast = ({ message, type }) => (
   <div
@@ -15,6 +14,15 @@ const Toast = ({ message, type }) => (
     {message}
   </div>
 );
+
+// 🔹 Helper to read a *valid* userId
+const getValidUserId = () => {
+  const raw = localStorage.getItem("userId");
+  if (!raw || raw === "undefined" || raw === "null") {
+    return null;
+  }
+  return raw;
+};
 
 export default function UserDashboard() {
   const [products, setProducts] = useState([]);
@@ -32,7 +40,7 @@ export default function UserDashboard() {
     localStorage.getItem("deliveryLocationKey") || ""
   );
 
-  const userId = localStorage.getItem("userId");
+  const userId = getValidUserId();
   const token = localStorage.getItem("token");
 
   const navigate = useNavigate();
@@ -56,7 +64,7 @@ export default function UserDashboard() {
     if (!token) {
       navigate("/login");
     }
-  }, [token, navigate]);
+  }, [token, userId, navigate]);
 
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });

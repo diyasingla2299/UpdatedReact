@@ -1,4 +1,5 @@
 // src/components/SearchDropdown.jsx
+// src/pages/SearchDropdown.jsx
 import React from "react";
 
 const SearchDropdown = ({

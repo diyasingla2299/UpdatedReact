@@ -52,7 +52,8 @@ const DashboardHome = () => {
       try {
         const token = localStorage.getItem("token");
 
-        const res = await fetch(`${API_BASE_URL}/api/admin`, {
+        // 🔹 FIXED: point to /api/admin/dashboard
+        const res = await fetch(`${API_BASE_URL}/api/admin/dashboard`, {
           headers: {
             "Content-Type": "application/json",
             Authorization: token ? `Bearer ${token}` : "",
@@ -129,6 +130,7 @@ const DashboardHome = () => {
     { key: "shipped", label: "Shipped" },
     { key: "delivered", label: "Delivered" },
     { key: "cancelled", label: "Cancelled" },
+    { key: "expired", label: "Expired" },
   ];
 
   const maxStatusVal = Math.max(
@@ -151,34 +153,27 @@ const DashboardHome = () => {
         ))}
       </section>
 
-      {/* chart + low stock */}
       <section className="lower-grid">
-        <article className="panel panel-main">
-          <div className="panel-header">
-            <h3>Orders by Status</h3>
-            <span className="panel-tag">Live</span>
-          </div>
+  <article className="panel panel-main">
+    <div className="panel-header">
+      <h3>Orders by Status</h3>
+      <span className="panel-tag">Live</span>
+    </div>
 
-          <div className="chart-wrapper">
-            <div className="mini-chart">
-              {statusLabels.map((s, index) => {
-                const val = ordersByStatus?.[s.key] || 0;
-                const height = (val / maxStatusVal) * 100;
-
-                return (
-                  <div key={s.key} className="mini-chart-col">
-                    <div
-                      className="mini-chart-bar"
-                      style={{ height: `${height}%` }}
-                    />
-                    <span className="mini-chart-label">{s.label}</span>
-                    <span className="mini-chart-value">{val}</span>
-                  </div>
-                );
-              })}
-            </div>
+    {/* Simple summary list instead of chart */}
+    <div className="orders-status-list">
+      {statusLabels.map((s) => {
+        const val = ordersByStatus?.[s.key] || 0;
+        return (
+          <div key={s.key} className="orders-status-row">
+            <span className="orders-status-name">{s.label}</span>
+            <span className="orders-status-count">{val}</span>
           </div>
-        </article>
+        );
+      })}
+    </div>
+  </article>
+
 
         <article className="panel panel-side">
           <div className="panel-header">
@@ -351,7 +346,12 @@ const ProductsView = () => {
         body: JSON.stringify(editingProduct),
       });
 
-      if (!res.ok) throw new Error("Update failed");
+      if (!res.ok) {
+  const text = await res.text();
+  console.error("Update failed:", res.status, text);
+  throw new Error(text || `Update failed (status ${res.status})`);
+}
+
 
       const updated = await res.json();
 
@@ -551,13 +551,29 @@ const OrdersView = () => {
           },
         });
 
-        if (!res.ok) throw new Error("Failed to load orders");
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error("Orders API error:", res.status, errorText);
+
+          if (res.status === 403) {
+            setError(
+              "You are not authorized to view orders. Please login as ADMIN or SELLER."
+            );
+          } else if (res.status === 404) {
+            setError("Orders endpoint not found (GET /api/orders).");
+          } else {
+            setError(
+              `Could not load orders (status ${res.status}).`
+            );
+          }
+          return;
+        }
 
         const data = await res.json();
         setOrders(data || []);
       } catch (err) {
         console.error("Orders error:", err);
-        setError("Could not load orders.");
+        setError("Could not load orders (network error).");
       } finally {
         setLoading(false);
       }
@@ -648,6 +664,11 @@ const OrdersView = () => {
   );
 };
 
+
+/* ========== PAYMENTS (SEARCH BY USER + UPDATE STATUS) ========== */
+
+/* ========== PAYMENTS (SEARCH BY USER + UPDATE STATUS) ========== */
+
 /* ========== PAYMENTS (SEARCH BY USER + UPDATE STATUS) ========== */
 
 const PaymentsView = () => {
@@ -657,8 +678,59 @@ const PaymentsView = () => {
   const [error, setError] = useState("");
   const [updatingId, setUpdatingId] = useState(null);
 
-  const getPaymentId = (p) => p.paymentId ?? p.payment_id;
+  // ✅ Normalize rows from /api/payments/user/{userId}
+  // 🔹 CHANGED: expanded to cover more possible key names
+  const normalizePayment = (row) => {
+    const paymentId =
+      row.payment_id ??
+      row.paymentId ??
+      row.PAYMENT_ID ??
+      row.id;
 
+    const orderId =
+      row.orderId ??
+      row.order_id ??
+      row.ORDER_ID;
+
+    const userId =
+      row.userId ??
+      row.user_id ??
+      row.USER_ID ??
+      row.buyer_id ??
+      row.BUYER_ID;
+
+    const amount =
+      row.amount ??
+      row.AMOUNT ??
+      row.paymentAmount ??
+      row.payment_amount;
+
+    const status =
+      row.status ??
+      row.STATUS ??
+      row.payment_status ??
+      row.paymentStatus;
+
+    const paymentMethod =
+      row.paymentMethod ??
+      row.payment_method ??
+      row.PAYMENT_METHOD ??
+      row.method ??
+      row.gateway;
+
+    return {
+      paymentId,
+      orderId,
+      userId,
+      amount,
+      status,
+      paymentMethod,
+    };
+  };
+
+  const getPaymentId = (p) => p.paymentId;
+
+  // 🔹 CHANGED: keep handleSearch reusable so we can call it after update
   const handleSearch = async () => {
     if (!userIdInput) {
       setError("Enter a user ID to search payments.");
@@ -668,6 +740,7 @@ const PaymentsView = () => {
 
     setLoading(true);
     setError("");
+
     try {
       const token = localStorage.getItem("token");
 
@@ -681,13 +754,25 @@ const PaymentsView = () => {
         }
       );
 
+      if (res.status === 404) {
+        // No payments for this user
+        setPayments([]);
+        return;
+      }
+
       if (!res.ok) throw new Error("Failed to load payments");
 
       const data = await res.json();
-      // controller returns List<Map<String,Object>>; keep as is
-      setPayments(data || []);
-    } catch (err) {
-      console.error("Payments error:", err);
+
+      // 🔹 CHANGED: log once to see actual keys (for debugging)
+      console.log("RAW PAYMENTS DATA:", data);
+
+      const normalized = (Array.isArray(data) ? data : []).map(
+        normalizePayment
+      );
+      setPayments(normalized);
+    } catch (e) {
+      console.error("Payments error:", e);
       setError("Could not load payments for this user.");
       setPayments([]);
     } finally {
@@ -695,11 +780,16 @@ const PaymentsView = () => {
     }
   };
 
+  // 🔹 CHANGED: after successful update, reload from backend so it's "real"
   const handleStatusChange = async (payment, newStatus) => {
     const paymentId = getPaymentId(payment);
-    if (!paymentId) return;
+    if (!paymentId) {
+      alert("Invalid payment ID");
+      return;
+    }
 
     setUpdatingId(paymentId);
+
     try {
       const token = localStorage.getItem("token");
 
@@ -715,18 +805,15 @@ const PaymentsView = () => {
         }
       );
 
-      if (!res.ok) throw new Error("Failed to update payment status");
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Failed to update payment status");
+      }
 
-      // backend returns PaymentDto
-      const updated = await res.json();
-
-      setPayments((prev) =>
-        prev.map((p) =>
-          getPaymentId(p) === paymentId ? { ...p, status: updated.status } : p
-        )
-      );
+      // 🔸 NEW: we *could* use the return value, but we prefer to reload list
+      await handleSearch(); // reload from DB so UI matches real data
     } catch (err) {
-      console.error(err);
+      console.error("Update payment status error:", err);
       alert("Could not update payment status.");
     } finally {
       setUpdatingId(null);
@@ -753,7 +840,7 @@ const PaymentsView = () => {
               className="filters-input"
               value={userIdInput}
               onChange={(e) => setUserIdInput(e.target.value)}
-              placeholder="e.g. 101"
+              placeholder="e.g. 1"
             />
           </label>
           <button className="filters-btn" onClick={handleSearch}>
@@ -773,62 +860,46 @@ const PaymentsView = () => {
               <th>User ID</th>
               <th>Amount</th>
               <th>Status</th>
-              <th>Created At</th>
               <th>Method</th>
               <th>Update Status</th>
             </tr>
           </thead>
           <tbody>
-            {payments.map((p) => {
-              const id = getPaymentId(p);
-              return (
-                <tr key={id}>
-                  <td>{id}</td>
-                  <td>{p.orderId}</td>
-                  <td>{p.userId}</td>
-                  <td>
-                    {p.amount != null
-                      ? `₹${Number(p.amount).toLocaleString("en-IN")}`
-                      : "-"}
-                  </td>
-                  <td>
-                    <span
-                      className={`status-pill status-${p.status?.toLowerCase()}`}
-                    >
-                      {p.status}
-                    </span>
-                  </td>
-                  <td>
-                    {p.createdAt
-                      ? new Date(p.createdAt).toLocaleString("en-IN")
-                      : "-"}
-                  </td>
-                  <td>{p.paymentMethod || p.method || "-"}</td>
-                  <td>
-                    <select
-                      className="status-select"
-                      value={p.status || ""}
-                      disabled={updatingId === id}
-                      onChange={(e) =>
-                        handleStatusChange(p, e.target.value || p.status)
-                      }
-                    >
-                      <option value="CREATED">CREATED</option>
-                      <option value="PENDING">PENDING</option>
-                      <option value="SUCCESS">SUCCESS</option>
-                      <option value="FAILED">FAILED</option>
-                    </select>
-                  </td>
-                </tr>
-              );
-            })}
+            {payments.map((p) => (
+              <tr key={p.paymentId}>
+                <td>{p.paymentId}</td>
+                <td>{p.orderId ?? "-"}</td>
+                <td>{p.userId ?? "-"}</td>
+                <td>
+                  {p.amount != null
+                    ? `₹${Number(p.amount).toLocaleString("en-IN")}`
+                    : "-"}
+                </td>
+                <td>{p.status || "-"}</td>
+                <td>{p.paymentMethod || "-"}</td>
+                <td>
+                  <select
+                    className="status-select"
+                    value={p.status || "CREATED"}
+                    disabled={updatingId === p.paymentId}
+                    onChange={(e) =>
+                      handleStatusChange(p, e.target.value || p.status)
+                    }
+                  ><option value="PENDING">PENDING</option>
+  <option value="PAID">PAID</option>      {/* instead of SUCCESS */}
+  <option value="FAILED">FAILED</option>
+  <option value="REFUNDED">REFUNDED</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
 
       {!loading && payments && payments.length === 0 && !error && (
         <p className="panel-subtitle">
-          No payments loaded. Enter a user ID and click "Load Payments".
+          No payments found for this user.
         </p>
       )}
     </section>
@@ -854,13 +925,29 @@ const UsersView = () => {
           },
         });
 
-        if (!res.ok) throw new Error("Failed to load users");
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error("Users API error:", res.status, errorText);
+
+          if (res.status === 403) {
+            setError(
+              "You are not authorized to view users. Please login as ADMIN."
+            );
+          } else if (res.status === 404) {
+            setError("Users endpoint not found (GET /api/users).");
+          } else {
+            setError(
+              `Could not load users (status ${res.status}).`
+            );
+          }
+          return;
+        }
 
         const data = await res.json();
         setUsers(data || []);
       } catch (err) {
         console.error("Users error:", err);
-        setError("Could not load users.");
+        setError("Could not load users (network error).");
       } finally {
         setLoading(false);
       }

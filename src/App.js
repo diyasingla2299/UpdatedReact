@@ -13,8 +13,8 @@ import CartPage from "./pages/CartPage";
 import UserProfilePage from "./pages/UserProfilePage";
 import ProductDetailsPage from "./pages/ProductDetailsPage";
 import MyOrdersPage from "./pages/MyOrdersPage";
+import SellerDashboard from "./pages/SellerDashboard";
 
-// ⭐ NEW: Search results page import
 import SearchResultsPage from "./pages/SearchResultsPage";
 
 function App() {
@@ -47,6 +47,12 @@ function App() {
           path="/admin"
           element={
             isLoggedIn ? <AdminDashboard /> : <Navigate to="/login" replace />
+          }
+        />
+        <Route
+          path="/seller"
+          element={
+            isLoggedIn ? <SellerDashboard /> : <Navigate to="/login" replace />
           }
         />
 
@@ -108,13 +114,12 @@ function App() {
         />
 
         {/* ⭐ NEW: Search results route (protected) */}
-        <Route
-          path="/search"
-          element={
-            isLoggedIn ? <SearchResultsPage /> : <Navigate to="/login" replace />
-          }
-        />
-
+       <Route
+  path="/search"
+  element={
+    isLoggedIn ? <SearchResultsPage /> : <Navigate to="/login" replace />
+  }
+/>
         {/* FALLBACK ROUTE */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
